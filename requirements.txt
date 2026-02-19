@@ -1,0 +1,4 @@
+pandas>=2.0
+matplotlib>=3.7
+pyyaml>=6.0
+huggingface_hub>=0.20
