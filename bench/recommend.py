@@ -49,8 +49,8 @@ def main():
     if df.empty:
         raise SystemExit("No configurations satisfy the given constraints.")
     
-    # score: maximize tg, minimize ttft + rss (simple, explainable)
-    # You can tune weights later.
+    # score: maximize tg, minimize ttft + rss
+    # Still need to tune weights.
     df["score"] = (
         1.0 * df["tg_tok_s"]
         - 0.3 * df["ttft_proxy_s"]
@@ -58,6 +58,32 @@ def main():
     )
     best = df.sort_values("score", ascending=False).iloc[0].to_dict()
 
+
+    rec = {
+        "device": device,
+        "workload": {"n_prompt": args.n_prompt, "n_gen": args.n_gen},
+        "recommended": {
+            "model_filename": best["model_filename"],
+            "quant": best["quant"],
+            "n_threads": int(best["n_threads"]),
+            "n_gpu_layers": int(best["n_gpu_layers"]) if not pd.isna(best["n_gpu_layers"]) else None,
+            "devices": best["devices"],
+        },
+        "expected": {
+            "pp_tok_s": float(best["pp_tok_s"]),
+            "tg_tok_s": float(best["tg_tok_s"]),
+            "ttft_proxy_s": float(best["ttft_proxy_s"]),
+            "max_rss_mb": float(best["max_rss_mb"]),
+        },
+        "note": "TTFT proxy computed as (n_prompt/pp_tok_s) + (1/tg_tok_s). Peak RSS from /usr/bin/time -l.",
+    }
+
+    os.makedirs(os.path.dirname(args.out), exist_ok=True)
+    with open(args.out, "w", encoding="utf-8") as f:
+        json.dump(rec, f, indent=2)
+
+    print("Recommended configuration:")
+    print(json.dumps(rec, indent=2))
 
 if __name__ == "__main__":
     main()
