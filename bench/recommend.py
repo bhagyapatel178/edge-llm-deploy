@@ -49,12 +49,14 @@ def main():
     if df.empty:
         raise SystemExit("No configurations satisfy the given constraints.")
     
+    df["rss_gb"] = df["max_rss_mb"] / 1024.0
+    
     # score: maximize tg, minimize ttft + rss
     # Still need to tune weights.
     df["score"] = (
         1.0 * df["tg_tok_s"]
         - 0.3 * df["ttft_proxy_s"]
-        - 0.05 * df["max_rss_mb"]
+        - 1.0 * df["rss_gb"]
     )
     best = df.sort_values("score", ascending=False).iloc[0].to_dict()
 
