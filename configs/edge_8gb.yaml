@@ -1,0 +1,16 @@
+device: auto
+
+# Recommender workload focus
+n_prompt: 1920
+n_gen: 128
+
+# Optional for objective=max_context
+min_n_prompt: 1920
+
+# Constraint profile
+max_rss_mb: 8192
+min_headroom_mb: 750
+max_ttft_s: 8.0
+min_tg_tok_s: 10.0
+
+topk: 5
