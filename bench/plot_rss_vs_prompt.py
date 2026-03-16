@@ -14,11 +14,12 @@ def main():
     # Keep only this model/quant for now (avoids clutter)
     df = df[df["quant"] == "q4_k_m"].copy()
 
-    df["n_prompt"] = df["n_prompt"].astype(int)
-    df["max_rss_mb"] = df["max_rss_mb"].astype(float)
+    df["n_prompt"] = pd.to_numeric(df["n_prompt"], errors="coerce")
+    df["max_rss_mb"] = pd.to_numeric(df["max_rss_mb"], errors="coerce")
+    df = df.dropna(subset=["n_prompt", "max_rss_mb"])
 
     plt.figure()
-    for dev in sorted(df["devices"].unique()):
+    for dev in sorted(df["devices"].dropna().unique()):
         sub = df[df["devices"] == dev].sort_values("n_prompt")
         plt.plot(sub["n_prompt"], sub["max_rss_mb"], marker="o", label=dev)
 
