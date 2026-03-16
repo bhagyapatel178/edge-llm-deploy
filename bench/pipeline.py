@@ -199,3 +199,30 @@ def write_recommendation(
     print(f"[recommend] wrote {out_path}")
     print(json.dumps(rec, indent=2))
     return rec
+
+
+def cleanup_models(
+    run_config: dict[str, Any],
+    runs_csv: str | Path,
+    constraints: dict[str, Any],
+    objective: str,
+    keep_top: int = 2,
+) -> None:
+    filtered_df, _device = build_filtered_df(runs_csv, constraints, objective)
+    ranked = sort_candidates(filtered_df, objective)
+
+    keep_paths: list[str] = []
+    for model_filename in ranked["model_filename"].tolist():
+        if model_filename not in keep_paths:
+            keep_paths.append(model_filename)
+        if len(keep_paths) >= keep_top:
+            break
+
+    keep_names = {Path(p).name for p in keep_paths}
+    model_dir = Path(run_config["model_dir"])
+
+    for quant_filename in run_config["quants"]:
+        path = model_dir / quant_filename
+        if path.exists() and path.name not in keep_names:
+            print(f"[cleanup] deleting {path}")
+            path.unlink()
