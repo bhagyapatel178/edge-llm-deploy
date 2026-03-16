@@ -226,3 +226,86 @@ def cleanup_models(
         if path.exists() and path.name not in keep_names:
             print(f"[cleanup] deleting {path}")
             path.unlink()
+
+
+def main() -> None:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--config", required=True)
+    ap.add_argument("--constraints", required=True)
+    ap.add_argument(
+        "--objective",
+        default="balanced",
+        choices=["quality_first", "speed_first", "balanced", "max_context"],
+    )
+    ap.add_argument("--cleanup", action="store_true")
+    ap.add_argument("--keep-top", type=int, default=2)
+    ap.add_argument("--force", action="store_true")
+    args = ap.parse_args()
+
+    run_cfg = load_yaml(args.config)
+    constraint_cfg = load_yaml(args.constraints)
+
+    runs_csv = Path(run_cfg.get("runs_csv", "results/runs.csv"))
+    plots_dir = Path(run_cfg.get("plots_dir", "results/plots"))
+    recommendation_out = Path(
+        run_cfg.get("recommendation_out", "results/recommendation.json")
+    )
+
+    runs_csv.parent.mkdir(parents=True, exist_ok=True)
+    plots_dir.mkdir(parents=True, exist_ok=True)
+    recommendation_out.parent.mkdir(parents=True, exist_ok=True)
+
+    ensure_models(
+        repo_id=run_cfg["repo_id"],
+        filenames=run_cfg["quants"],
+        model_dir=run_cfg["model_dir"],
+        prefer_cli=bool(run_cfg.get("prefer_hf_cli", True)),
+    )
+
+    specs = build_run_specs(run_cfg)
+    ingested_pairs = existing_ingested_pairs(runs_csv)
+
+    for spec in specs:
+        run_benchmark(
+            spec,
+            llama_bench_bin=run_cfg.get("llama_bench_bin", "llama-bench"),
+            time_bin=run_cfg.get("time_bin", "/usr/bin/time"),
+            time_args=run_cfg.get("time_args", ["-l"]),
+            force=args.force,
+        )
+
+        pair = (str(spec.jsonl_path), str(spec.time_path))
+
+        if spec.jsonl_path.exists() and spec.time_path.exists():
+            if args.force and pair in ingested_pairs:
+                remove_ingested_pair(runs_csv, spec.jsonl_path, spec.time_path)
+                ingested_pairs.remove(pair)
+
+            if pair not in ingested_pairs:
+                ingest_one(str(spec.jsonl_path), str(spec.time_path), str(runs_csv))
+                ingested_pairs.add(pair)
+            else:
+                print(f"[ingest] already indexed {spec.jsonl_path.name}")
+
+    subprocess.run([sys.executable, "-m", "bench.plot_all"], check=True)
+
+    write_recommendation(
+        runs_csv=runs_csv,
+        constraints=constraint_cfg,
+        objective=args.objective,
+        out_path=recommendation_out,
+        topk=int(constraint_cfg.get("topk", 5)),
+    )
+
+    if args.cleanup:
+        cleanup_models(
+            run_config=run_cfg,
+            runs_csv=runs_csv,
+            constraints=constraint_cfg,
+            objective=args.objective,
+            keep_top=args.keep_top,
+        )
+
+
+if __name__ == "__main__":
+    main()
