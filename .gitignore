@@ -2,6 +2,7 @@
 models/
 results/
 external/
+archives/
 
 # python
 __pycache__/
