@@ -16,10 +16,136 @@ from .ingest_jsonl_time import main as ingest_one
 from .recommend import apply_constraints, choose_best, load_and_clean, pick_device
 from .run_grid import build_run_specs, run_benchmark
 
+from collections import defaultdict
+from datetime import datetime, timezone
 
 def load_yaml(path: str | Path) -> dict[str, Any]:
     with open(path, "r", encoding="utf-8") as f:
         return yaml.safe_load(f)
+
+def grouped_specs_by_model_device(specs):
+    groups = defaultdict(list)
+    for spec in specs:
+        groups[(str(spec.model_path), spec.device)].append(spec)
+
+    for _, group in groups.items():
+        group.sort(key=lambda s: s.n_prompt)
+        yield group
+
+
+def load_result_row(
+    runs_csv: str | Path,
+    jsonl_path: str | Path,
+    time_path: str | Path,
+) -> dict[str, Any] | None:
+    csv_path = Path(runs_csv)
+    if not csv_path.exists():
+        return None
+
+    df = pd.read_csv(csv_path)
+    if "jsonl_path" not in df.columns or "time_path" not in df.columns:
+        return None
+
+    sub = df[
+        (df["jsonl_path"] == str(jsonl_path)) &
+        (df["time_path"] == str(time_path))
+    ]
+    if sub.empty:
+        return None
+
+    row = sub.iloc[-1].to_dict()
+    for col in ["pp_tok_s", "tg_tok_s", "ttft_proxy_s", "max_rss_mb", "n_prompt", "n_gen"]:
+        if col in row:
+            row[col] = pd.to_numeric(row[col], errors="coerce")
+    return row
+
+
+SKIP_FIELDS = [
+    "timestamp_utc",
+    "reason",
+    "model_filename",
+    "quant",
+    "devices",
+    "n_prompt",
+    "n_gen",
+    "jsonl_path",
+    "time_path",
+    "predicted_next_ttft_s",
+    "current_ttft_s",
+    "current_max_rss_mb",
+    "elapsed_s",
+]
+
+
+def upsert_skip_record(skip_csv: str | Path, record: dict[str, Any]) -> None:
+    skip_csv = Path(skip_csv)
+    skip_csv.parent.mkdir(parents=True, exist_ok=True)
+
+    if skip_csv.exists():
+        df = pd.read_csv(skip_csv)
+        if "jsonl_path" in df.columns and "time_path" in df.columns:
+            df = df[
+                ~(
+                    (df["jsonl_path"] == record["jsonl_path"]) &
+                    (df["time_path"] == record["time_path"])
+                )
+            ]
+    else:
+        df = pd.DataFrame(columns=SKIP_FIELDS)
+
+    df = pd.concat([df, pd.DataFrame([record])], ignore_index=True)
+    df.to_csv(skip_csv, index=False)
+
+
+def effective_rss_limit_mb(constraints: dict[str, Any]) -> float | None:
+    max_rss_mb = constraints.get("max_rss_mb")
+    min_headroom_mb = constraints.get("min_headroom_mb")
+
+    if max_rss_mb is None:
+        return None
+    if min_headroom_mb is not None:
+        return float(max_rss_mb) - float(min_headroom_mb)
+    return float(max_rss_mb)
+
+
+def prune_decision(
+    current_row: dict[str, Any],
+    next_prompt: int,
+    objective: str,
+    constraints: dict[str, Any],
+) -> tuple[str | None, dict[str, Any]]:
+    prune_cfg = constraints.get("prune", {})
+    if not prune_cfg.get("enabled", False):
+        return None, {}
+
+    rss_limit = effective_rss_limit_mb(constraints)
+    current_rss = float(current_row["max_rss_mb"])
+    current_ttft = float(current_row["ttft_proxy_s"])
+
+    if prune_cfg.get("stop_on_memory", True) and rss_limit is not None:
+        if current_rss > rss_limit:
+            return "memory_budget_exceeded", {
+                "current_max_rss_mb": current_rss,
+                "current_ttft_s": current_ttft,
+            }
+
+    apply_to = set(prune_cfg.get("apply_to_objectives", ["balanced", "speed_first"]))
+    if objective in apply_to and prune_cfg.get("stop_on_predicted_ttft", True):
+        max_ttft_s = constraints.get("max_ttft_s")
+        if max_ttft_s is not None:
+            pp_tok_s = float(current_row["pp_tok_s"])
+            tg_tok_s = float(current_row["tg_tok_s"])
+            predicted_next_ttft = (next_prompt / pp_tok_s) + (1.0 / tg_tok_s)
+
+            multiplier = float(prune_cfg.get("ttft_multiplier", 1.0))
+            if predicted_next_ttft > float(max_ttft_s) * multiplier:
+                return "predicted_ttft_exceeds_threshold", {
+                    "predicted_next_ttft_s": predicted_next_ttft,
+                    "current_max_rss_mb": current_rss,
+                    "current_ttft_s": current_ttft,
+                }
+
+    return None, {}
 
 
 def existing_ingested_pairs(csv_path: str | Path) -> set[tuple[str, str]]:
@@ -265,27 +391,101 @@ def main() -> None:
     specs = build_run_specs(run_cfg)
     ingested_pairs = existing_ingested_pairs(runs_csv)
 
-    for spec in specs:
-        run_benchmark(
-            spec,
-            llama_bench_bin=run_cfg.get("llama_bench_bin", "llama-bench"),
-            time_bin=run_cfg.get("time_bin", "/usr/bin/time"),
-            time_args=run_cfg.get("time_args", ["-l"]),
-            force=args.force,
-        )
+    skip_csv = Path(run_cfg.get("skipped_runs_csv", "results/skipped_runs.csv"))
+    prune_cfg = constraint_cfg.get("prune", {})
+    timeout_s = prune_cfg.get("timeout_s")
 
-        pair = (str(spec.jsonl_path), str(spec.time_path))
+    for group in grouped_specs_by_model_device(specs):
+        stop_reason = None
+        stop_details: dict[str, Any] = {}
 
-        if spec.jsonl_path.exists() and spec.time_path.exists():
-            if args.force and pair in ingested_pairs:
-                remove_ingested_pair(runs_csv, spec.jsonl_path, spec.time_path)
-                ingested_pairs.remove(pair)
+        for i, spec in enumerate(group):
+            if stop_reason is not None:
+                upsert_skip_record(
+                    skip_csv,
+                    {
+                        "timestamp_utc": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                        "reason": stop_reason,
+                        "model_filename": str(spec.model_path),
+                        "quant": spec.quant,
+                        "devices": spec.device,
+                        "n_prompt": spec.n_prompt,
+                        "n_gen": spec.n_gen,
+                        "jsonl_path": str(spec.jsonl_path),
+                        "time_path": str(spec.time_path),
+                        "predicted_next_ttft_s": stop_details.get("predicted_next_ttft_s"),
+                        "current_ttft_s": stop_details.get("current_ttft_s"),
+                        "current_max_rss_mb": stop_details.get("current_max_rss_mb"),
+                        "elapsed_s": stop_details.get("elapsed_s"),
+                    },
+                )
+                print(f"[prune] skipped {spec.jsonl_path.stem}: {stop_reason}")
+                continue
 
-            if pair not in ingested_pairs:
-                ingest_one(str(spec.jsonl_path), str(spec.time_path), str(runs_csv))
-                ingested_pairs.add(pair)
-            else:
-                print(f"[ingest] already indexed {spec.jsonl_path.name}")
+            result = run_benchmark(
+                spec,
+                llama_bench_bin=run_cfg.get("llama_bench_bin", "llama-bench"),
+                time_bin=run_cfg.get("time_bin", "/usr/bin/time"),
+                time_args=run_cfg.get("time_args", ["-l"]),
+                force=args.force,
+                timeout_s=timeout_s,
+            )
+
+            pair = (str(spec.jsonl_path), str(spec.time_path))
+
+            if result["status"] == "timeout":
+                stop_reason = "timeout"
+                stop_details = {"elapsed_s": result["elapsed_s"]}
+                upsert_skip_record(
+                    skip_csv,
+                    {
+                        "timestamp_utc": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                        "reason": "timeout",
+                        "model_filename": str(spec.model_path),
+                        "quant": spec.quant,
+                        "devices": spec.device,
+                        "n_prompt": spec.n_prompt,
+                        "n_gen": spec.n_gen,
+                        "jsonl_path": str(spec.jsonl_path),
+                        "time_path": str(spec.time_path),
+                        "predicted_next_ttft_s": None,
+                        "current_ttft_s": None,
+                        "current_max_rss_mb": None,
+                        "elapsed_s": result["elapsed_s"],
+                    },
+                )
+                continue
+
+            if spec.jsonl_path.exists() and spec.time_path.exists():
+                if args.force and pair in ingested_pairs:
+                    remove_ingested_pair(runs_csv, spec.jsonl_path, spec.time_path)
+                    ingested_pairs.remove(pair)
+
+                if pair not in ingested_pairs:
+                    ingest_one(str(spec.jsonl_path), str(spec.time_path), str(runs_csv))
+                    ingested_pairs.add(pair)
+                else:
+                    print(f"[ingest] already indexed {spec.jsonl_path.name}")
+
+            row = load_result_row(runs_csv, spec.jsonl_path, spec.time_path)
+            if row is None:
+                continue
+
+            if i + 1 < len(group):
+                next_prompt = group[i + 1].n_prompt
+                reason, details = prune_decision(
+                    current_row=row,
+                    next_prompt=next_prompt,
+                    objective=args.objective,
+                    constraints=constraint_cfg,
+                )
+                if reason is not None:
+                    stop_reason = reason
+                    stop_details = details
+                    print(
+                        f"[prune] stopping larger prompts for "
+                        f"{spec.model_path.name} on {spec.device}: {reason}"
+                    )
 
     subprocess.run([sys.executable, "-m", "bench.plot_all"], check=True)
 
