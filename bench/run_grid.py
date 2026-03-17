@@ -1,7 +1,9 @@
 from __future__ import annotations
 
-import re
+import os
+import signal
 import subprocess
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -108,17 +110,23 @@ def logs_exist_and_nonempty(jsonl_path: Path, time_path: Path) -> bool:
     )
 
 
+def _cleanup_partial_logs(jsonl_path: Path, time_path: Path) -> None:
+    for path in [jsonl_path, time_path]:
+        if path.exists() and path.stat().st_size == 0:
+            path.unlink(missing_ok=True)
+
+
 def run_benchmark(
     spec: RunSpec,
     llama_bench_bin: str = "llama-bench",
     time_bin: str = "/usr/bin/time",
     time_args: list[str] | None = None,
     force: bool = False,
-) -> str:
+    timeout_s: int | None = None,
+) -> dict[str, Any]:
     """
-    Returns one of:
-      - 'ran'
-      - 'skipped_existing'
+    Returns:
+      {"status": "ran" | "skipped_existing" | "timeout", "elapsed_s": float | None}
     """
     time_args = time_args or ["-l"]
 
@@ -127,7 +135,7 @@ def run_benchmark(
 
     if not force and logs_exist_and_nonempty(spec.jsonl_path, spec.time_path):
         print(f"[skip] logs already exist for {spec.jsonl_path.stem}")
-        return "skipped_existing"
+        return {"status": "skipped_existing", "elapsed_s": None}
 
     spec.jsonl_path.parent.mkdir(parents=True, exist_ok=True)
     spec.time_path.parent.mkdir(parents=True, exist_ok=True)
@@ -136,28 +144,44 @@ def run_benchmark(
         time_bin,
         *time_args,
         llama_bench_bin,
-        "-m",
-        str(spec.model_path),
-        "-p",
-        str(spec.n_prompt),
-        "-n",
-        str(spec.n_gen),
-        "-t",
-        str(spec.threads),
-        "-ngl",
-        str(spec.ngl),
-        "-r",
-        str(spec.repetitions),
-        "-dev",
-        spec.device,
-        "-o",
-        "jsonl",
+        "-m", str(spec.model_path),
+        "-p", str(spec.n_prompt),
+        "-n", str(spec.n_gen),
+        "-t", str(spec.threads),
+        "-ngl", str(spec.ngl),
+        "-r", str(spec.repetitions),
+        "-dev", spec.device,
+        "-o", "jsonl",
     ]
 
     print("[run]", " ".join(cmd))
-    with spec.jsonl_path.open("w", encoding="utf-8") as stdout_f, spec.time_path.open(
-        "w", encoding="utf-8"
-    ) as stderr_f:
-        subprocess.run(cmd, stdout=stdout_f, stderr=stderr_f, check=True)
 
-    return "ran"
+    start = time.monotonic()
+    with spec.jsonl_path.open("w", encoding="utf-8") as stdout_f, spec.time_path.open("w", encoding="utf-8") as stderr_f:
+        proc = subprocess.Popen(
+            cmd,
+            stdout=stdout_f,
+            stderr=stderr_f,
+            start_new_session=True,
+        )
+
+        try:
+            proc.wait(timeout=timeout_s)
+        except subprocess.TimeoutExpired:
+            os.killpg(proc.pid, signal.SIGTERM)
+            try:
+                proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                os.killpg(proc.pid, signal.SIGKILL)
+                proc.wait()
+
+            elapsed = time.monotonic() - start
+            _cleanup_partial_logs(spec.jsonl_path, spec.time_path)
+            print(f"[timeout] {spec.jsonl_path.stem} after {elapsed:.1f}s")
+            return {"status": "timeout", "elapsed_s": elapsed}
+
+        if proc.returncode != 0:
+            raise subprocess.CalledProcessError(proc.returncode, cmd)
+
+    elapsed = time.monotonic() - start
+    return {"status": "ran", "elapsed_s": elapsed}
