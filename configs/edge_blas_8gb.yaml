@@ -1,8 +1,8 @@
 device: BLAS
 
-n_prompt: 1920
+n_prompt: 512
 n_gen: 128
-min_n_prompt: 1920
+min_n_prompt: 512
 
 max_rss_mb: 8192
 min_headroom_mb: 750
