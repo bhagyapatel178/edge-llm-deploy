@@ -1,0 +1,81 @@
+{
+  "device": "MTL0",
+  "objective": "balanced",
+  "workload": {
+    "n_prompt": 1920,
+    "n_gen": 128
+  },
+  "constraints": {
+    "max_rss_mb": 8192,
+    "min_headroom_mb": 750,
+    "max_ttft_s": 8.0,
+    "min_tg_tok_s": 10.0,
+    "min_n_prompt": 1920
+  },
+  "recommended": {
+    "model_filename": "models/qwen2.5-3b/qwen2.5-3b-instruct-q4_k_m.gguf",
+    "quant": "q4_k_m",
+    "n_threads": 8,
+    "n_gpu_layers": 80,
+    "devices": "MTL0"
+  },
+  "expected": {
+    "pp_tok_s": 844.7,
+    "tg_tok_s": 83.94,
+    "ttft_proxy_s": 2.285,
+    "max_rss_mb": 2425.5
+  },
+  "top_candidates": [
+    {
+      "model_filename": "models/qwen2.5-3b/qwen2.5-3b-instruct-q4_k_m.gguf",
+      "quant": "q4_k_m",
+      "devices": "MTL0",
+      "n_prompt": 1920,
+      "n_gen": 128,
+      "tg_tok_s": 83.94,
+      "ttft_proxy_s": 2.285,
+      "max_rss_mb": 2425.5
+    },
+    {
+      "model_filename": "models/qwen2.5-3b/qwen2.5-3b-instruct-q6_k.gguf",
+      "quant": "q6_k",
+      "devices": "MTL0",
+      "n_prompt": 1920,
+      "n_gen": 128,
+      "tg_tok_s": 68.47,
+      "ttft_proxy_s": 2.334,
+      "max_rss_mb": 3082.2
+    },
+    {
+      "model_filename": "models/qwen2.5-3b/qwen2.5-3b-instruct-q3_k_m.gguf",
+      "quant": "q3_k_m",
+      "devices": "MTL0",
+      "n_prompt": 1920,
+      "n_gen": 128,
+      "tg_tok_s": 67.26,
+      "ttft_proxy_s": 2.379,
+      "max_rss_mb": 2064.8
+    },
+    {
+      "model_filename": "models/qwen2.5-3b/qwen2.5-3b-instruct-q3_k_m.gguf",
+      "quant": "q3_k_m",
+      "devices": "MTL0",
+      "n_prompt": 1920,
+      "n_gen": 128,
+      "tg_tok_s": 66.78,
+      "ttft_proxy_s": 2.385,
+      "max_rss_mb": 2062.8
+    },
+    {
+      "model_filename": "models/qwen2.5-3b/qwen2.5-3b-instruct-q8_0.gguf",
+      "quant": "q8_0",
+      "devices": "MTL0",
+      "n_prompt": 1920,
+      "n_gen": 128,
+      "tg_tok_s": 62.0,
+      "ttft_proxy_s": 2.209,
+      "max_rss_mb": 3938.6
+    }
+  ],
+  "note": "TTFT proxy computed as (n_prompt/pp_tok_s) + (1/tg_tok_s). Peak RSS from /usr/bin/time."
+}
