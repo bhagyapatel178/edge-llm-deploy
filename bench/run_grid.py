@@ -37,9 +37,20 @@ class RunSpec:
 
 def infer_quant_tag(filename: str) -> str:
     s = filename.lower()
-    for q in QUANT_PATTERNS:
-        if q in s:
-            return q
+
+    if "q3_k_m" in s or "q3_k_s" in s:
+        return "q3"
+    if "q4_k_m" in s or "q4_k_s" in s:
+        return "q4"
+    if "q5_k_m" in s or "q5_k_s" in s:
+        return "q5"
+    if "q6_k" in s:
+        return "q6"
+    if "q8_0" in s:
+        return "q8"
+    if "f16" in s or "fp16" in s:
+        return "f16"
+
     return Path(filename).stem.lower()
 
 
