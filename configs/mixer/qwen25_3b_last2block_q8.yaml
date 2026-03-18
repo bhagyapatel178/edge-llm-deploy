@@ -1,0 +1,6 @@
+low: models/qwen2.5-3b/qwen2.5-3b-instruct-q4_k_m.gguf
+high: models/qwen2.5-3b/qwen2.5-3b-instruct-q8_0.gguf
+output: models/mixed/qwen2.5-3b-instruct-q4_k_m_last2blocks_q8_0.gguf
+policy: last_n_blocks
+last_n: 2
+recipe_json: artifacts/mixer/recipes/qwen25_3b_last2blocks_q8.json
