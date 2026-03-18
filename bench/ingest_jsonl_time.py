@@ -2,7 +2,7 @@ import csv
 import json 
 import re
 import sys 
-from datetime import datetime
+from datetime import datetime, UTC
 from pathlib import Path
 
 RSS_RE = re.compile(r"^\s*(\d+)\s+maximum resident set size\s*$")
@@ -77,7 +77,7 @@ def main(jsonl_path: str, time_path:str, out_csv:str = "results/runs.csv"):
     ttft_proxy = (n_prompt / pp_tps) + (1.0 / tg_tps)
 
     record = {
-        "timestamp_utc": datetime.utcnow().isoformat(timespec="seconds") + "Z",
+        "timestamp_utc": datetime.now(UTC).isoformat(timespec="seconds").replace("+00:00", "Z"),
         "test_time_utc": tg.get("test_time", pp.get("test_time", "")),
         "model_type": pp.get("model_type", ""),
         "model_filename": pp.get("model_filename", ""),
