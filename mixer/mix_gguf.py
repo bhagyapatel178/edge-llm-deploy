@@ -126,3 +126,37 @@ def load_config(args: argparse.Namespace) -> MixerConfig:
         recipe_json=Path(pick("recipe_json")) if pick("recipe_json") else None,
         dry_run=bool(args.dry_run or config_data.get("dry_run", False)),
     )
+
+
+def reader_arch(reader: Any) -> str:
+    field = reader.get_field("general.architecture")
+    if field is None:
+        raise MixerError("Could not find general.architecture in GGUF metadata.")
+    return str(field.contents())
+
+
+def reader_alignment(reader: Any) -> int:
+    field = reader.get_field("general.alignment")
+    if field is None:
+        return 32
+    return int(field.contents())
+
+
+def tensors_by_name(reader: Any) -> dict[str, TensorRecord]:
+    return {
+        tensor.name: TensorRecord(
+            name=tensor.name,
+            tensor_type=tensor.tensor_type,
+            shape=tuple(int(x) for x in tensor.shape.tolist()),
+            n_bytes=int(tensor.n_bytes),
+            data=tensor.data,
+        )
+        for tensor in reader.tensors
+    }
+
+
+def block_index(name: str) -> int | None:
+    match = BLOCK_RE.match(name)
+    if match:
+        return int(match.group(1))
+    return None
