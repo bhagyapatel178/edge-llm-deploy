@@ -19,7 +19,7 @@ except ImportError as exc:  # pragma: no cover
 
 
 LOGGER = logging.getLogger("mixer.mix_gguf")
-GGUF_INTERNAL_KEYS = {"GGUF.version", "GGUF.tensor_count", "GGUF.kv_count"}
+GGUF_INTERNAL_KEYS = {"GGUF.version", "GGUF.tensor_count", "GGUF.kv_count","general.architecture"}
 BLOCK_RE = re.compile(r"^blk\.(\d+)\.")
 
 
@@ -62,7 +62,7 @@ def parse_args() -> argparse.Namespace:
         choices=["last_n_blocks", "output_plus_last_n_blocks", "regex_list"],
         help="Tensor selection policy.",
     )
-    parser.add_argument("--last-n", type=int, default=0, help="Number of final transformer blocks to protect.")
+    parser.add_argument("--last-n", type=int, default=None, help="Number of final transformer blocks to protect.")
     parser.add_argument(
         "--include-regex",
         action="append",
@@ -176,6 +176,9 @@ def select_tensors(
     selected: set[str] = set()
     block_ids = sorted({bid for bid in (block_index(name) for name in names) if bid is not None})
     protected_blocks: set[int] = set(block_ids[-last_n:]) if last_n > 0 else set()
+
+    if policy in {"last_n_blocks", "output_plus_last_n_blocks"} and last_n <= 0:
+        raise MixerError(f"Policy {policy!r} requires last_n > 0")
 
     if policy == "last_n_blocks":
         selected = {name for name in names if (bid := block_index(name)) is not None and bid in protected_blocks}
@@ -342,7 +345,7 @@ def main() -> None:
         writer.add_tensor(
             name=name,
             tensor=source.data,
-            raw_shape=source.shape,
+            raw_shape=tuple(int(x) for x in source.data.shape),
             raw_dtype=source.tensor_type,
         )
 
