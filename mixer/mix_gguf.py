@@ -47,3 +47,82 @@ class TensorRecord:
 
 class MixerError(RuntimeError):
     pass
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Create a mixed-precision GGUF by copying selected tensors from a higher-precision source."
+    )
+    parser.add_argument("--config", type=Path, help="Optional YAML config file.")
+    parser.add_argument("--low", type=Path, help="Low-precision GGUF source, e.g. Q4_K_M.")
+    parser.add_argument("--high", type=Path, help="Higher-precision GGUF source, e.g. Q8_0 or F16.")
+    parser.add_argument("--output", type=Path, help="Output mixed GGUF path.")
+    parser.add_argument(
+        "--policy",
+        choices=["last_n_blocks", "output_plus_last_n_blocks", "regex_list"],
+        help="Tensor selection policy.",
+    )
+    parser.add_argument("--last-n", type=int, default=0, help="Number of final transformer blocks to protect.")
+    parser.add_argument(
+        "--include-regex",
+        action="append",
+        default=None,
+        help="Regex for tensors to take from the high-precision source. Repeatable.",
+    )
+    parser.add_argument(
+        "--exclude-regex",
+        action="append",
+        default=None,
+        help="Regex for tensors to force back to the low-precision source. Repeatable.",
+    )
+    parser.add_argument("--recipe-json", type=Path, help="Optional provenance JSON output.")
+    parser.add_argument("--dry-run", action="store_true", help="Print the selection only; do not write a GGUF.")
+    parser.add_argument("--verbose", action="store_true", help="Enable info logging.")
+    return parser.parse_args()
+
+
+def load_config(args: argparse.Namespace) -> MixerConfig:
+    config_data: dict[str, Any] = {}
+    if args.config:
+        with args.config.open("r", encoding="utf-8") as fh:
+            raw = yaml.safe_load(fh) or {}
+            if not isinstance(raw, dict):
+                raise MixerError("Config file must contain a YAML mapping.")
+            config_data = raw
+
+    def pick(name: str, default: Any = None) -> Any:
+        cli_value = getattr(args, name)
+        if cli_value is not None:
+            return cli_value
+        return config_data.get(name, default)
+
+    low_raw = pick("low")
+    high_raw = pick("high")
+    output_raw = pick("output")
+
+    if not low_raw:
+        raise MixerError("Missing required 'low' path.")
+    if not high_raw:
+        raise MixerError("Missing required 'high' path.")
+    if not output_raw:
+        raise MixerError("Missing required 'output' path.")
+
+    low = Path(low_raw)
+    high = Path(high_raw)
+    output = Path(output_raw)
+
+    policy = pick("policy")
+    if not policy:
+        raise MixerError("A policy is required.")
+
+    return MixerConfig(
+        low=low,
+        high=high,
+        output=output,
+        policy=policy,
+        last_n=int(pick("last_n", 0) or 0),
+        include_regex=list(pick("include_regex") or []),
+        exclude_regex=list(pick("exclude_regex") or []),
+        recipe_json=Path(pick("recipe_json")) if pick("recipe_json") else None,
+        dry_run=bool(args.dry_run or config_data.get("dry_run", False)),
+    )
