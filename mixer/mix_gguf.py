@@ -160,3 +160,45 @@ def block_index(name: str) -> int | None:
     if match:
         return int(match.group(1))
     return None
+
+
+def compile_many(patterns: Iterable[str]) -> list[re.Pattern[str]]:
+    return [re.compile(p) for p in patterns]
+
+
+def select_tensors(
+    names: list[str],
+    policy: str,
+    last_n: int,
+    include_regex: list[str],
+    exclude_regex: list[str],
+) -> set[str]:
+    selected: set[str] = set()
+    block_ids = sorted({bid for bid in (block_index(name) for name in names) if bid is not None})
+    protected_blocks: set[int] = set(block_ids[-last_n:]) if last_n > 0 else set()
+
+    if policy == "last_n_blocks":
+        selected = {name for name in names if (bid := block_index(name)) is not None and bid in protected_blocks}
+    elif policy == "output_plus_last_n_blocks":
+        selected = {
+            name
+            for name in names
+            if ((bid := block_index(name)) is not None and bid in protected_blocks)
+            or name == "output.weight"
+        }
+    elif policy == "regex_list":
+        selected = set()
+    else:
+        raise MixerError(f"Unsupported policy: {policy}")
+
+    include_res = compile_many(include_regex)
+    exclude_res = compile_many(exclude_regex)
+
+    for name in names:
+        if any(rx.search(name) for rx in include_res):
+            selected.add(name)
+    for name in list(selected):
+        if any(rx.search(name) for rx in exclude_res):
+            selected.discard(name)
+
+    return selected
