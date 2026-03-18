@@ -242,3 +242,123 @@ def copy_metadata(reader: Any, writer: Any) -> None:
         main_type = field.types[0]
         sub_type = field.types[-1] if main_type == gguf.GGUFValueType.ARRAY and len(field.types) > 1 else None
         writer.add_key_value(key, value, main_type, sub_type)
+
+
+def write_recipe_json(
+    path: Path,
+    config: MixerConfig,
+    selected: set[str],
+    low_reader: Any,
+    high_reader: Any,
+    low_tensors: dict[str, TensorRecord],
+    high_tensors: dict[str, TensorRecord],
+) -> None:
+    protected = []
+    for name in sorted(selected):
+        ht = high_tensors[name]
+        lt = low_tensors[name]
+        protected.append(
+            {
+                "name": name,
+                "shape": list(ht.shape),
+                "high_type": str(ht.tensor_type.name),
+                "low_type": str(lt.tensor_type.name),
+                "n_bytes_high": ht.n_bytes,
+                "n_bytes_low": lt.n_bytes,
+            }
+        )
+
+    recipe = {
+        "low": str(config.low),
+        "high": str(config.high),
+        "output": str(config.output),
+        "policy": config.policy,
+        "last_n": config.last_n,
+        "include_regex": config.include_regex, 
+        "exclude_regex": config.exclude_regex,
+        "architecture": reader_arch(low_reader),
+        "protected_tensor_count": len(protected),
+        "protected_tensors": protected,
+    }
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(recipe, indent=2), encoding="utf-8")
+
+
+def main() -> None:
+    args = parse_args()
+    logging.basicConfig(
+        level=logging.INFO if args.verbose else logging.WARNING,
+        format="%(levelname)s %(message)s",
+    )
+    config = load_config(args)
+
+    if not config.low.exists():
+        raise MixerError(f"Low-precision GGUF not found: {config.low}")
+    if not config.high.exists():
+        raise MixerError(f"High-precision GGUF not found: {config.high}")
+
+    low_reader = gguf.GGUFReader(config.low)
+    high_reader = gguf.GGUFReader(config.high)
+    low_tensors, high_tensors = validate_compatible(low_reader, high_reader)
+
+    ordered_names = [tensor.name for tensor in low_reader.tensors]
+    selected = select_tensors(
+        ordered_names,
+        policy=config.policy,
+        last_n=config.last_n,
+        include_regex=config.include_regex or [],
+        exclude_regex=config.exclude_regex or [],
+    )
+
+    LOGGER.info("Selected %d protected tensors.", len(selected))
+    for name in sorted(selected)[:20]:
+        LOGGER.info("protect -> %s", name)
+    if len(selected) > 20:
+        LOGGER.info("... plus %d more", len(selected) - 20)
+
+    if config.recipe_json:
+        write_recipe_json(config.recipe_json, config, selected, low_reader, high_reader, low_tensors, high_tensors)
+
+    if config.dry_run:
+        print(json.dumps({
+            "selected_count": len(selected),
+            "selected": sorted(selected),
+        }, indent=2))
+        return
+
+    config.output.parent.mkdir(parents=True, exist_ok=True)
+
+    arch = reader_arch(low_reader)
+    alignment = reader_alignment(low_reader)
+    writer = gguf.GGUFWriter(path=config.output, arch=arch, use_temp_file=False)
+    writer.add_custom_alignment(alignment)
+    copy_metadata(low_reader, writer)
+
+    protected_count = 0
+    for name in ordered_names:
+        source = high_tensors[name] if name in selected else low_tensors[name]
+        if name in selected:
+            protected_count += 1
+        writer.add_tensor(
+            name=name,
+            tensor=source.data,
+            raw_shape=source.shape,
+            raw_dtype=source.tensor_type,
+        )
+
+    writer.write_header_to_file()
+    writer.write_kv_data_to_file()
+    writer.write_tensors_to_file(progress=True)
+    writer.close()
+
+    summary = {
+        "output": str(config.output),
+        "architecture": arch,
+        "protected_tensor_count": protected_count,
+        "total_tensor_count": len(ordered_names),
+    }
+    print(json.dumps(summary, indent=2))
+
+
+if __name__ == "__main__":
+    main()
