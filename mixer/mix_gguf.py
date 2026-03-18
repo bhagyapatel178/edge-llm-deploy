@@ -202,3 +202,43 @@ def select_tensors(
             selected.discard(name)
 
     return selected
+
+
+def validate_compatible(low_reader: Any, high_reader: Any) -> tuple[dict[str, TensorRecord], dict[str, TensorRecord]]:
+    low_arch = reader_arch(low_reader)
+    high_arch = reader_arch(high_reader)
+    if low_arch != high_arch:
+        raise MixerError(f"Architecture mismatch: low={low_arch!r}, high={high_arch!r}")
+
+    low_tensors = tensors_by_name(low_reader)
+    high_tensors = tensors_by_name(high_reader)
+
+    low_names = set(low_tensors)
+    high_names = set(high_tensors)
+    if low_names != high_names:
+        missing_from_high = sorted(low_names - high_names)
+        missing_from_low = sorted(high_names - low_names)
+        raise MixerError(
+            "Tensor name mismatch between low/high GGUFs. "
+            f"Missing from high: {missing_from_high[:5]} | Missing from low: {missing_from_low[:5]}"
+        )
+
+    for name in low_tensors:
+        lt = low_tensors[name]
+        ht = high_tensors[name]
+        if lt.shape != ht.shape:
+            raise MixerError(f"Shape mismatch for tensor {name}: low={lt.shape}, high={ht.shape}")
+
+    return low_tensors, high_tensors
+
+
+def copy_metadata(reader: Any, writer: Any) -> None:
+    for key, field in reader.fields.items():
+        if key in GGUF_INTERNAL_KEYS or key == "general.alignment":
+            continue
+        value = field.contents()
+        if not field.types:
+            continue
+        main_type = field.types[0]
+        sub_type = field.types[-1] if main_type == gguf.GGUFValueType.ARRAY and len(field.types) > 1 else None
+        writer.add_key_value(key, value, main_type, sub_type)
