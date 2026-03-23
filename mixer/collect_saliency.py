@@ -27,3 +27,15 @@ def build_target_map():
             out[hf_pat.format(i=i)] = gguf_pat.format(i=i)
     out["lm_head"] = "output.weight"
     return out
+
+def load_chunks(eval_path: str, tokenizer, max_chunks=64, chunk_tokens=256):
+    text = Path(eval_path).read_text(encoding="utf-8")
+    ids = tokenizer(text, return_tensors="pt", add_special_tokens=False)["input_ids"][0]
+    chunks = []
+    step = chunk_tokens
+    total = min(len(ids) // step, max_chunks)
+    for i in range(total):
+        chunk = ids[i*step:(i+1)*step]
+        if len(chunk) == step:
+            chunks.append(chunk.unsqueeze(0))
+    return chunks
