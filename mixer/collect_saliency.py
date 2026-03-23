@@ -71,5 +71,12 @@ def main():
         if hf_name in name_to_module:
             handles.append(name_to_module[hf_name].register_forward_hook(make_hook(gguf_name)))
 
+    chunks = load_chunks("prompts/perplexity/eval.txt", tokenizer, max_chunks=64, chunk_tokens=256)
+
+    with torch.inference_mode():
+        for chunk in chunks:
+            chunk = chunk.to(DEVICE)
+            _ = model(input_ids=chunk, use_cache=False)
+
 if __name__ == "__main__":
     main()
