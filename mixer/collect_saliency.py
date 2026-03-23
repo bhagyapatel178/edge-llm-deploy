@@ -56,5 +56,20 @@ def main():
 
     name_to_module = dict(model.named_modules())
 
+    def make_hook(gguf_name):
+        def hook(module, inputs, output):
+            x = output[0] if isinstance(output, tuple) else output
+            if not torch.is_tensor(x):
+                return
+            x = x.detach().float()
+            stats[gguf_name]["sum_abs"] += x.abs().sum().item()
+            stats[gguf_name]["sum_sq"] += (x * x).sum().item()
+            stats[gguf_name]["count"] += x.numel()
+        return hook
+
+    for hf_name, gguf_name in target_map.items():
+        if hf_name in name_to_module:
+            handles.append(name_to_module[hf_name].register_forward_hook(make_hook(gguf_name)))
+
 if __name__ == "__main__":
     main()
