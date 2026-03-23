@@ -39,3 +39,22 @@ def load_chunks(eval_path: str, tokenizer, max_chunks=64, chunk_tokens=256):
         if len(chunk) == step:
             chunks.append(chunk.unsqueeze(0))
     return chunks
+
+def main():
+    tokenizer = AutoTokenizer.from_pretrained(MODEL_ID)
+    model = AutoModelForCausalLM.from_pretrained(MODEL_ID, torch_dtype=DTYPE)
+    model.to(DEVICE)
+    model.eval()
+
+    target_map = build_target_map()
+    stats = {
+        gguf_name: {"sum_abs": 0.0, "sum_sq": 0.0, "count": 0}
+        for gguf_name in target_map.values()
+    }
+
+    handles = []
+
+    name_to_module = dict(model.named_modules())
+
+if __name__ == "__main__":
+    main()
