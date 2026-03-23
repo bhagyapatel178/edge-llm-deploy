@@ -78,5 +78,27 @@ def main():
             chunk = chunk.to(DEVICE)
             _ = model(input_ids=chunk, use_cache=False)
 
+    for h in handles:
+        h.remove()
+
+    out = {}
+    for name, s in stats.items():
+        if s["count"] == 0:
+            continue
+        mean_abs = s["sum_abs"] / s["count"]
+        rms = math.sqrt(s["sum_sq"] / s["count"])
+        out[name] = {
+            "mean_abs": mean_abs,
+            "rms": rms,
+            "count": s["count"],
+        }
+
+    Path("artifacts/mixer/saliency").mkdir(parents=True, exist_ok=True)
+    Path("artifacts/mixer/saliency/qwen25_3b_v2_saliency.json").write_text(
+        json.dumps(out, indent=2),
+        encoding="utf-8"
+    )
+
+
 if __name__ == "__main__":
     main()
