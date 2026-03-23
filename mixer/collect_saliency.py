@@ -19,3 +19,11 @@ TARGETS = {
     "model.layers.{i}.mlp.down_proj": "blk.{i}.ffn_down.weight",
 }
 N_LAYERS = 36 # arbitrary for now, depends on model/config
+
+def build_target_map():
+    out = {}
+    for i in range(N_LAYERS):
+        for hf_pat, gguf_pat in TARGETS.items():
+            out[hf_pat.format(i=i)] = gguf_pat.format(i=i)
+    out["lm_head"] = "output.weight"
+    return out
