@@ -137,6 +137,26 @@ def load_config(args: argparse.Namespace) -> MixerConfig:
         dry_run=bool(args.dry_run or config_data.get("dry_run", False)),
     )
 
+def load_selected_names_from_recipe(path: Path) -> set[str]:
+    if not path.exists():
+        raise MixerError(f"Selected recipe JSON not found: {path}")
+
+    raw = json.loads(path.read_text(encoding="utf-8"))
+
+    if "selected_tensors" in raw:
+        # v2 recipe format
+        items = raw["selected_tensors"]
+        names = {item["name"] for item in items}
+    elif "protected_tensors" in raw:
+        # fallback for older recipe format
+        items = raw["protected_tensors"]
+        names = {item["name"] for item in items}
+    else:
+        raise MixerError(
+            f"Recipe JSON {path} does not contain 'selected_tensors' or 'protected_tensors'."
+        )
+
+    return names
 
 def reader_arch(reader: Any) -> str:
     field = reader.get_field("general.architecture")
