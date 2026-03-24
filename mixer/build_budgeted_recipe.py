@@ -1,28 +1,68 @@
 from __future__ import annotations
 
-from pathlib import Path
+import argparse
 import json
 import math
+from pathlib import Path
 from typing import Any
 
 import gguf
 
 
-LOW_GGUF = "models/qwen2.5-3b/qwen2.5-3b-instruct-q4_k_m.gguf"
-HIGH_GGUF = "models/qwen2.5-3b/qwen2.5-3b-instruct-q8_0.gguf"
-SALIENCY_JSON = "artifacts/mixer/saliency/qwen25_3b_v2_saliency.json"
-OUTPUT_JSON = "artifacts/mixer/recipes/qwen25_3b_v2_budget_match.json"
+DEFAULT_LOW_GGUF = "models/qwen2.5-3b/qwen2.5-3b-instruct-q4_k_m.gguf"
+DEFAULT_HIGH_GGUF = "models/qwen2.5-3b/qwen2.5-3b-instruct-q8_0.gguf"
+DEFAULT_SALIENCY_JSON = "artifacts/mixer/saliency/qwen25_3b_v2_saliency.json"
+DEFAULT_OUTPUT_JSON = "artifacts/mixer/recipes/qwen25_3b_v2_budget_match.json"
 
-# Match the extra storage cost of your best v1 recipe:
-# output + last2 q8 = 2.09 GB
-# vanilla q4        = 1.96 GB
-TARGET_EXTRA_GB = 2.09 - 1.96
-
-# Use 0.5 MB bins for knapsack
+# 0.5 MiB bins
 BIN_BYTES = 512 * 1024
 
-# Force include output.weight based on v1 results
-FORCED_NAMES = {"output.weight"}
+# Keep the same best-working v2.1 choice
+DEFAULT_FORCED_NAMES = {"output.weight"}
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Build a budgeted tensor-promotion recipe from saliency scores."
+    )
+    parser.add_argument(
+        "--low-gguf",
+        default=DEFAULT_LOW_GGUF,
+        help="Low-precision GGUF path.",
+    )
+    parser.add_argument(
+        "--high-gguf",
+        default=DEFAULT_HIGH_GGUF,
+        help="High-precision GGUF path.",
+    )
+    parser.add_argument(
+        "--saliency-json",
+        default=DEFAULT_SALIENCY_JSON,
+        help="Saliency JSON path.",
+    )
+    parser.add_argument(
+        "--output-json",
+        default=DEFAULT_OUTPUT_JSON,
+        help="Output recipe JSON path.",
+    )
+    parser.add_argument(
+        "--target-extra-mib",
+        type=float,
+        required=True,
+        help="Target extra budget over the low model, in MiB.",
+    )
+    parser.add_argument(
+        "--force-name",
+        action="append",
+        default=None,
+        help="Tensor name to always include. Repeatable. Default: output.weight",
+    )
+    parser.add_argument(
+        "--policy-name",
+        default="saliency_knapsack_budget_sweep_v2_1",
+        help="Policy label to write into the output JSON.",
+    )
+    return parser.parse_args()
 
 
 def load_tensor_map(path: str) -> dict[str, Any]:
@@ -30,7 +70,7 @@ def load_tensor_map(path: str) -> dict[str, Any]:
     return {tensor.name: tensor for tensor in reader.tensors}
 
 
-def is_candidate_tensor(name: str, low_tensor: Any, high_tensor: Any) -> bool:
+def is_candidate_tensor(low_tensor: Any, high_tensor: Any) -> bool:
     """
     Restrict to tensors where promotion actually matters:
     - tensor exists in both
@@ -52,13 +92,22 @@ def is_candidate_tensor(name: str, low_tensor: Any, high_tensor: Any) -> bool:
 
     return True
 
+
 def main() -> None:
-    low_map = load_tensor_map(LOW_GGUF)
-    high_map = load_tensor_map(HIGH_GGUF)
+    args = parse_args()
 
-    saliency = json.loads(Path(SALIENCY_JSON).read_text(encoding="utf-8"))
+    low_gguf = args.low_gguf
+    high_gguf = args.high_gguf
+    saliency_json = args.saliency_json
+    output_json = args.output_json
+    forced_names = set(args.force_name) if args.force_name else set(DEFAULT_FORCED_NAMES)
 
-    target_extra_bytes = int(round(TARGET_EXTRA_GB * (1024 ** 3)))
+    low_map = load_tensor_map(low_gguf)
+    high_map = load_tensor_map(high_gguf)
+
+    saliency = json.loads(Path(saliency_json).read_text(encoding="utf-8"))
+
+    target_extra_bytes = int(round(args.target_extra_mib * (1024 ** 2)))
 
     candidates: list[dict[str, Any]] = []
 
@@ -69,26 +118,33 @@ def main() -> None:
         low_tensor = low_map[name]
         high_tensor = high_map[name]
 
-        if not is_candidate_tensor(name, low_tensor, high_tensor):
+        if not is_candidate_tensor(low_tensor, high_tensor):
             continue
 
         weight_rms = scores.get("weight_rms")
         if weight_rms is None:
             continue
 
+        rms = scores.get("rms")
+        mean_abs = scores.get("mean_abs")
+        count = scores.get("count")
+
+        if rms is None or mean_abs is None or count is None:
+            continue
+
         delta_bytes = int(high_tensor.n_bytes) - int(low_tensor.n_bytes)
         cost_bins = max(1, math.ceil(delta_bytes / BIN_BYTES))
 
         # v2.1 score: rms activation * rms weight
-        saliency_score = float(scores["rms"]) * float(weight_rms)
+        saliency_score = float(rms) * float(weight_rms)
 
         candidates.append({
             "name": name,
             "score": saliency_score,
-            "mean_abs": float(scores["mean_abs"]),
-            "rms": float(scores["rms"]),
+            "mean_abs": float(mean_abs),
+            "rms": float(rms),
             "weight_rms": float(weight_rms),
-            "count": int(scores["count"]),
+            "count": int(count),
             "numel": scores.get("numel"),
             "delta_bytes": delta_bytes,
             "cost_bins": cost_bins,
@@ -100,9 +156,8 @@ def main() -> None:
     if not candidates:
         raise RuntimeError("No candidate tensors found. Check saliency JSON and GGUF compatibility.")
 
-    # Split forced vs remaining candidates
-    forced = [c for c in candidates if c["name"] in FORCED_NAMES]
-    remaining = [c for c in candidates if c["name"] not in FORCED_NAMES]
+    forced = [c for c in candidates if c["name"] in forced_names]
+    remaining = [c for c in candidates if c["name"] not in forced_names]
 
     forced_bytes = sum(c["delta_bytes"] for c in forced)
     forced_score = sum(c["score"] for c in forced)
@@ -113,7 +168,7 @@ def main() -> None:
 
     budget_bins = remaining_budget_bytes // BIN_BYTES
 
-    # 0-1 knapsack DP on remaining tensors
+    # 0-1 knapsack over remaining tensors
     n = len(remaining)
     dp = [0.0] * (budget_bins + 1)
     keep = [[False] * (budget_bins + 1) for _ in range(n)]
@@ -156,7 +211,6 @@ def main() -> None:
             selected_names.add(item["name"])
             used_remaining_bytes += item["delta_bytes"]
 
-    # Final selected set
     selected = forced + selected_remaining
     used_bytes = forced_bytes + used_remaining_bytes
     used_bins = sum(item["cost_bins"] for item in selected_remaining) + sum(item["cost_bins"] for item in forced)
@@ -181,43 +235,48 @@ def main() -> None:
     greedy_score = forced_score + sum(item["score"] for item in greedy_selected_remaining)
 
     out = {
-        "policy": "saliency_knapsack_budget_match_v2_1",
-        "low": LOW_GGUF,
-        "high": HIGH_GGUF,
-        "saliency_json": SALIENCY_JSON,
+        "policy": args.policy_name,
+        "low": low_gguf,
+        "high": high_gguf,
+        "saliency_json": saliency_json,
         "score_definition": "rms_activation_times_rms_weight",
-        "forced_names": sorted(FORCED_NAMES),
+        "forced_names": sorted(forced_names),
+        "target_extra_mib": args.target_extra_mib,
         "target_budget_bytes": target_extra_bytes,
         "forced_bytes": forced_bytes,
         "remaining_budget_bytes": remaining_budget_bytes,
         "budget_bins": budget_bins,
         "bin_bytes": BIN_BYTES,
         "used_bytes": used_bytes,
-        "used_bins": used_bins,
+        "used_mib": used_bytes / (1024 ** 2),
         "selected_count": len(selected),
+        "used_bins": used_bins,
         "total_score": total_score,
         "selected_tensors": selected,
+        "selected_tensor_names": [item["name"] for item in selected],
         "greedy_baseline": {
             "policy": "forced_plus_score_per_byte_greedy",
             "selected_count": len(greedy_selected),
             "used_bytes": greedy_used,
+            "used_mib": greedy_used / (1024 ** 2),
             "total_score": greedy_score,
             "selected_tensor_names": [item["name"] for item in greedy_selected],
         },
     }
 
-    out_path = Path(OUTPUT_JSON)
+    out_path = Path(output_json)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(json.dumps(out, indent=2), encoding="utf-8")
 
     print(f"Wrote recipe: {out_path}")
-    print(f"Candidates: {len(candidates)}")
-    print(f"Forced tensors: {len(forced)}")
-    print(f"Target budget: {target_extra_bytes / (1024**2):.1f} MB")
-    print(f"Forced bytes:  {forced_bytes / (1024**2):.1f} MB")
-    print(f"Used:          {used_bytes / (1024**2):.1f} MB")
+    print(f"Candidates:       {len(candidates)}")
+    print(f"Forced tensors:   {len(forced)}")
+    print(f"Target budget:    {target_extra_bytes / (1024**2):.2f} MiB")
+    print(f"Forced bytes:     {forced_bytes / (1024**2):.2f} MiB")
+    print(f"Used bytes:       {used_bytes / (1024**2):.2f} MiB")
     print(f"Selected tensors: {len(selected)}")
-    print(f"Total score: {total_score:.6f}")
+    print(f"Total score:      {total_score:.6f}")
+
 
 if __name__ == "__main__":
     main()
