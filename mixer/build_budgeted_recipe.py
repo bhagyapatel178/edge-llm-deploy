@@ -137,5 +137,39 @@ def main() -> None:
             greedy_selected.append(item)
             greedy_used += item["delta_bytes"]
 
+    out = {
+        "policy": "saliency_knapsack_budget_match_v2",
+        "low": LOW_GGUF,
+        "high": HIGH_GGUF,
+        "saliency_json": SALIENCY_JSON,
+        "score_definition": "mean_abs",
+        "budget_bytes": target_extra_bytes,
+        "budget_bins": budget_bins,
+        "bin_bytes": BIN_BYTES,
+        "used_bytes": used_bytes,
+        "used_bins": used_bins,
+        "selected_count": len(selected),
+        "total_score": total_score,
+        "selected_tensors": selected,
+        "greedy_baseline": {
+            "policy": "score_per_byte_greedy",
+            "selected_count": len(greedy_selected),
+            "used_bytes": greedy_used,
+            "total_score": sum(item["score"] for item in greedy_selected),
+            "selected_tensor_names": [item["name"] for item in greedy_selected],
+        },
+    }
+
+    out_path = Path(OUTPUT_JSON)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(json.dumps(out, indent=2), encoding="utf-8")
+
+    print(f"Wrote recipe: {out_path}")
+    print(f"Candidates: {len(candidates)}")
+    print(f"Budget: {target_extra_bytes / (1024**2):.1f} MB")
+    print(f"Used:   {used_bytes / (1024**2):.1f} MB")
+    print(f"Selected tensors: {len(selected)}")
+    print(f"Total score: {total_score:.6f}")
+
 if __name__ == "__main__":
     main()
