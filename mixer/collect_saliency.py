@@ -55,6 +55,8 @@ def main():
     handles = []
     name_to_module = dict(model.named_modules())
 
+    weight_stats = {}
+
     def make_hook(gguf_name):
         def hook(module, inputs, output):
             x = output[0] if isinstance(output, tuple) else output
@@ -68,9 +70,20 @@ def main():
 
     for hf_name, gguf_name in target_map.items():
         if hf_name in name_to_module:
-            handles.append(
-                name_to_module[hf_name].register_forward_hook(make_hook(gguf_name))
-            )
+            module = name_to_module[hf_name]
+
+            if hasattr(module, "weight") and module.weight is not None:
+                w = module.weight.detach().float()
+                weight_rms = torch.sqrt((w * w).mean()).item()
+            else:
+                weight_rms = None
+
+            weight_stats[gguf_name] = {
+                "weight_rms": weight_rms,
+                "numel": int(module.weight.numel()) if hasattr(module, "weight") and module.weight is not None else None,
+            }
+
+            handles.append(module.register_forward_hook(make_hook(gguf_name)))
 
     chunks = load_chunks("prompts/calibration/calib.txt", tokenizer, max_chunks=64, chunk_tokens=256)
 
@@ -92,6 +105,8 @@ def main():
             "mean_abs": mean_abs,
             "rms": rms,
             "count": s["count"],
+            "weight_rms": weight_stats.get(name, {}).get("weight_rms"),
+            "numel": weight_stats.get(name, {}).get("numel"),
         }
 
     Path("artifacts/mixer/saliency").mkdir(parents=True, exist_ok=True)
