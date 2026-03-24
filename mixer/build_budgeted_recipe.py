@@ -91,6 +91,37 @@ def main() -> None:
 
     if not candidates:
         raise RuntimeError("No candidate tensors found. Check saliency JSON and GGUF compatibility.")
+    
+    # 0-1 knapsack DP
+    n = len(candidates)
+    dp = [0.0] * (budget_bins + 1)
+    keep = [[False] * (budget_bins + 1) for _ in range(n)]
+
+    for i, item in enumerate(candidates):
+        w = item["cost_bins"]
+        v = item["score"]
+
+        for b in range(budget_bins, w - 1, -1):
+            alt = dp[b - w] + v
+            if alt > dp[b]:
+                dp[b] = alt
+                keep[i][b] = True
+
+    # Recover chosen set
+    b = max(range(budget_bins + 1), key=lambda x: dp[x])
+    selected: list[dict[str, Any]] = []
+
+    for i in range(n - 1, -1, -1):
+        if keep[i][b]:
+            item = candidates[i]
+            selected.append(item)
+            b -= item["cost_bins"]
+
+    selected.reverse()
+
+    used_bytes = sum(item["delta_bytes"] for item in selected)
+    used_bins = sum(item["cost_bins"] for item in selected)
+    total_score = sum(item["score"] for item in selected)
 
 if __name__ == "__main__":
     main()
