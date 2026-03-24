@@ -1,4 +1,3 @@
-# mixer/v2_collect_saliency.py
 from pathlib import Path
 import json
 import math
@@ -18,11 +17,10 @@ TARGETS = {
     "model.layers.{i}.mlp.up_proj": "blk.{i}.ffn_up.weight",
     "model.layers.{i}.mlp.down_proj": "blk.{i}.ffn_down.weight",
 }
-N_LAYERS = 36 # arbitrary for now, depends on model/config
 
-def build_target_map():
+def build_target_map(n_layers: int):
     out = {}
-    for i in range(N_LAYERS):
+    for i in range(n_layers):
         for hf_pat, gguf_pat in TARGETS.items():
             out[hf_pat.format(i=i)] = gguf_pat.format(i=i)
     out["lm_head"] = "output.weight"
@@ -35,7 +33,7 @@ def load_chunks(eval_path: str, tokenizer, max_chunks=64, chunk_tokens=256):
     step = chunk_tokens
     total = min(len(ids) // step, max_chunks)
     for i in range(total):
-        chunk = ids[i*step:(i+1)*step]
+        chunk = ids[i * step:(i + 1) * step]
         if len(chunk) == step:
             chunks.append(chunk.unsqueeze(0))
     return chunks
@@ -46,14 +44,15 @@ def main():
     model.to(DEVICE)
     model.eval()
 
-    target_map = build_target_map()
+    n_layers = model.config.num_hidden_layers
+    target_map = build_target_map(n_layers)
+
     stats = {
         gguf_name: {"sum_abs": 0.0, "sum_sq": 0.0, "count": 0}
         for gguf_name in target_map.values()
     }
 
     handles = []
-
     name_to_module = dict(model.named_modules())
 
     def make_hook(gguf_name):
@@ -69,9 +68,11 @@ def main():
 
     for hf_name, gguf_name in target_map.items():
         if hf_name in name_to_module:
-            handles.append(name_to_module[hf_name].register_forward_hook(make_hook(gguf_name)))
+            handles.append(
+                name_to_module[hf_name].register_forward_hook(make_hook(gguf_name))
+            )
 
-    chunks = load_chunks("prompts/perplexity/eval.txt", tokenizer, max_chunks=64, chunk_tokens=256)
+    chunks = load_chunks("prompts/calibration/calib.txt", tokenizer, max_chunks=64, chunk_tokens=256)
 
     with torch.inference_mode():
         for chunk in chunks:
@@ -96,9 +97,8 @@ def main():
     Path("artifacts/mixer/saliency").mkdir(parents=True, exist_ok=True)
     Path("artifacts/mixer/saliency/qwen25_3b_v2_saliency.json").write_text(
         json.dumps(out, indent=2),
-        encoding="utf-8"
+        encoding="utf-8",
     )
-
 
 if __name__ == "__main__":
     main()
