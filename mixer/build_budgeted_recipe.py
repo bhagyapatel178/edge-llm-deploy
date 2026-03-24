@@ -123,5 +123,19 @@ def main() -> None:
     used_bins = sum(item["cost_bins"] for item in selected)
     total_score = sum(item["score"] for item in selected)
 
+    # Also compute greedy baseline for comparison/debugging
+    greedy_candidates = sorted(
+        candidates,
+        key=lambda x: x["score"] / x["delta_bytes"],
+        reverse=True,
+    )
+
+    greedy_selected = []
+    greedy_used = 0
+    for item in greedy_candidates:
+        if greedy_used + item["delta_bytes"] <= target_extra_bytes:
+            greedy_selected.append(item)
+            greedy_used += item["delta_bytes"]
+
 if __name__ == "__main__":
     main()
