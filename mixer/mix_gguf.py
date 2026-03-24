@@ -202,6 +202,7 @@ def select_tensors(
     last_n: int,
     include_regex: list[str],
     exclude_regex: list[str],
+    selected_names: set[str] | None = None,
 ) -> set[str]:
     selected: set[str] = set()
     block_ids = sorted({bid for bid in (block_index(name) for name in names) if bid is not None})
@@ -221,6 +222,13 @@ def select_tensors(
         }
     elif policy == "regex_list":
         selected = set()
+    elif policy == "explicit_list":
+        if not selected_names:
+            raise MixerError("Policy 'explicit_list' requires a non-empty selected_names set.")
+        unknown = sorted(set(selected_names) - set(names))
+        if unknown:
+            raise MixerError(f"Recipe contains unknown tensor names, e.g. {unknown[:5]}")
+        selected = set(selected_names)
     else:
         raise MixerError(f"Unsupported policy: {policy}")
 
