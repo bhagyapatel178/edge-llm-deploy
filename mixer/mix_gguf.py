@@ -342,6 +342,12 @@ def main() -> None:
     high_reader = gguf.GGUFReader(config.high)
     low_tensors, high_tensors = validate_compatible(low_reader, high_reader)
 
+    selected_names = None
+    if config.policy == "explicit_list":
+        if config.selected_recipe is None:
+            raise MixerError("Policy 'explicit_list' requires selected_recipe.")
+        selected_names = load_selected_names_from_recipe(config.selected_recipe)
+
     ordered_names = [tensor.name for tensor in low_reader.tensors]
     selected = select_tensors(
         ordered_names,
@@ -349,6 +355,7 @@ def main() -> None:
         last_n=config.last_n,
         include_regex=config.include_regex or [],
         exclude_regex=config.exclude_regex or [],
+        selected_names=selected_names,
     )
 
     LOGGER.info("Selected %d protected tensors.", len(selected))
