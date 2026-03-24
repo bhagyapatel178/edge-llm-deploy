@@ -1,0 +1,8 @@
+low: models/qwen2.5-3b/qwen2.5-3b-instruct-q4_k_m.gguf
+high: models/qwen2.5-3b/qwen2.5-3b-instruct-q8_0.gguf
+output: models/mixed/qwen2.5-3b-instruct-q4_k_m_v2_budget_match_q8_0.gguf
+
+policy: explicit_list
+selected_recipe: artifacts/mixer/recipes/qwen25_3b_v2_budget_match.json
+
+recipe_json: artifacts/mixer/recipes/qwen25_3b_v2_built_recipe.json
