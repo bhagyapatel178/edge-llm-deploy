@@ -32,6 +32,7 @@ class MixerConfig:
     last_n: int = 0
     include_regex: list[str] | None = None
     exclude_regex: list[str] | None = None
+    selected_recipe: Path | None = None
     recipe_json: Path | None = None
     dry_run: bool = False
 
@@ -59,7 +60,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output", type=Path, help="Output mixed GGUF path.")
     parser.add_argument(
         "--policy",
-        choices=["last_n_blocks", "output_plus_last_n_blocks", "regex_list"],
+        choices=["last_n_blocks", "output_plus_last_n_blocks", "regex_list", "explicit_list"],
         help="Tensor selection policy.",
     )
     parser.add_argument("--last-n", type=int, default=None, help="Number of final transformer blocks to protect.")
@@ -74,6 +75,11 @@ def parse_args() -> argparse.Namespace:
         action="append",
         default=None,
         help="Regex for tensors to force back to the low-precision source. Repeatable.",
+    )
+    parser.add_argument(
+        "--selected-recipe",
+        type=Path,
+        help="Optional recipe JSON containing explicitly selected tensor names.",
     )
     parser.add_argument("--recipe-json", type=Path, help="Optional provenance JSON output.")
     parser.add_argument("--dry-run", action="store_true", help="Print the selection only; do not write a GGUF.")
@@ -100,6 +106,9 @@ def load_config(args: argparse.Namespace) -> MixerConfig:
     high_raw = pick("high")
     output_raw = pick("output")
 
+    selected_recipe_raw = pick("selected_recipe")
+    selected_recipe = Path(selected_recipe_raw) if selected_recipe_raw else None
+
     if not low_raw:
         raise MixerError("Missing required 'low' path.")
     if not high_raw:
@@ -123,6 +132,7 @@ def load_config(args: argparse.Namespace) -> MixerConfig:
         last_n=int(pick("last_n", 0) or 0),
         include_regex=list(pick("include_regex") or []),
         exclude_regex=list(pick("exclude_regex") or []),
+        selected_recipe=selected_recipe,
         recipe_json=Path(pick("recipe_json")) if pick("recipe_json") else None,
         dry_run=bool(args.dry_run or config_data.get("dry_run", False)),
     )
