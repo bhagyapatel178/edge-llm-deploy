@@ -1,11 +1,16 @@
 import csv
-import json 
+import json
 import re
-import sys 
-from datetime import datetime, UTC
+import sys
+from datetime import UTC, datetime
 from pathlib import Path
 
-RSS_RE = re.compile(r"^\s*(\d+)\s+maximum resident set size\s*$")
+# macOS /usr/bin/time -l example:
+#   2543327232  maximum resident set size
+# GNU /usr/bin/time -v example:
+#   Maximum resident set size (kbytes): 2483720
+MAC_RSS_RE = re.compile(r"^\s*(\d+)\s+maximum resident set size\s*$", re.IGNORECASE)
+GNU_RSS_RE = re.compile(r"^\s*Maximum resident set size \(kbytes\):\s*(\d+)\s*$", re.IGNORECASE)
 
 FIELDS = [
     "timestamp_utc",
@@ -29,22 +34,32 @@ FIELDS = [
     "time_path",
 ]
 
-def parse_time_max_rss_bytes(time_text:str) -> int:
-    for line in time_text.splitlines():
-        m = RSS_RE.match(line)
-        if m:
-            return int(m.group(1))
-    raise ValueError("Could not find 'maximum resident set size' in time output")
 
-def infer_quant(model_filename:str) -> str:
+def parse_time_max_rss_mb(time_text: str) -> float:
+    for line in time_text.splitlines():
+        m = MAC_RSS_RE.match(line)
+        if m:
+            rss_bytes = int(m.group(1))
+            return rss_bytes / 1024 / 1024
+
+        m = GNU_RSS_RE.match(line)
+        if m:
+            rss_kb = int(m.group(1))
+            return rss_kb / 1024
+
+    raise ValueError("Could not find max RSS in time output (expected macOS '-l' or GNU '-v').")
+
+
+def infer_quant(model_filename: str) -> str:
     s = model_filename.lower()
     for q in ["q8_0", "q6_k", "q4_k_m", "q3_k_m", "f16", "fp16"]:
         if q in s:
             return q
     return "unknown"
 
-def read_jsonl(path:Path):
-    rows = [] 
+
+def read_jsonl(path: Path):
+    rows = []
     with path.open("r", encoding="utf-8") as f:
         for line in f:
             line = line.strip()
@@ -54,26 +69,24 @@ def read_jsonl(path:Path):
         raise ValueError(f"No JSONL rows in {path}")
     return rows
 
-def main(jsonl_path: str, time_path:str, out_csv:str = "results/runs.csv"):
+
+def main(jsonl_path: str, time_path: str, out_csv: str = "results/runs.csv"):
     jsonl_path = Path(jsonl_path)
     time_path = Path(time_path)
 
     rows = read_jsonl(jsonl_path)
     time_text = time_path.read_text(encoding="utf-8", errors="ignore")
-    max_rss_bytes = parse_time_max_rss_bytes(time_text)
-    max_rss_mb = max_rss_bytes/ 1024 / 1024
+    max_rss_mb = parse_time_max_rss_mb(time_text)
 
-    # find pp (Prompt Processing) and tg (Token Generation) entries
     pp = next((r for r in rows if r.get("n_prompt", 0) > 0 and r.get("n_gen", 0) == 0), None)
     tg = next((r for r in rows if r.get("n_gen", 0) > 0 and r.get("n_prompt", 0) == 0), None)
     if pp is None or tg is None:
-        raise ValueError("Could not find both pp (n_prompt>0) and tg (n_gen>0) entries in JSONL.")
-    
+        raise ValueError("Could not find both pp and tg entries in JSONL.")
+
     pp_tps = float(pp["avg_ts"])
     tg_tps = float(tg["avg_ts"])
     n_prompt = int(pp["n_prompt"])
     n_gen = int(tg["n_gen"])
-
     ttft_proxy = (n_prompt / pp_tps) + (1.0 / tg_tps)
 
     record = {
@@ -107,11 +120,11 @@ def main(jsonl_path: str, time_path:str, out_csv:str = "results/runs.csv"):
         if write_header:
             w.writeheader()
         w.writerow(record)
-    
+
     print(f"Appended 1 run to {out_csv}")
 
 if __name__ == "__main__":
     if len(sys.argv) != 3:
-        print("Usage: python bench/ingest_jsonl_time.py <run.jsonl> <run.times>")
+        print("Usage: python bench/ingest_jsonl_time.py <run.jsonl> <run.time>")
         raise SystemExit(2)
     main(sys.argv[1], sys.argv[2])
