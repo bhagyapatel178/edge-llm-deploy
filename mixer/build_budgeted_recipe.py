@@ -164,7 +164,13 @@ def main() -> None:
 
     remaining_budget_bytes = target_extra_bytes - forced_bytes
     if remaining_budget_bytes < 0:
-        raise RuntimeError("Forced tensors exceed target budget.")
+        forced_mib = forced_bytes / (1024 ** 2)
+        target_mib = target_extra_bytes / (1024 ** 2)
+        raise RuntimeError(
+            f"Forced tensors exceed target budget: "
+            f"forced={forced_mib:.2f} MiB, target={target_mib:.2f} MiB. "
+            f"Increase --target-extra-mib or remove forced tensors."
+        )
 
     budget_bins = remaining_budget_bytes // BIN_BYTES
 
