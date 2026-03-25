@@ -1,0 +1,27 @@
+repo_id: Qwen/Qwen2.5-3B-Instruct-GGUF
+model_dir: models/qwen2.5-3b
+
+quants:
+  - qwen2.5-3b-instruct-q3_k_m.gguf
+  - qwen2.5-3b-instruct-q4_k_m.gguf
+  - qwen2.5-3b-instruct-q6_k.gguf
+
+llama_bench_bin: ./llama.cpp/build/bin/llama-bench
+time_bin: /usr/bin/time
+time_args: ["-v"]
+
+threads: 4
+repetitions: 1
+n_gen: 128
+
+devices:
+  - name: BLAS
+    ngl: 0
+
+prompt_tokens: [512, 1024, 1536, 1920, 2560]
+
+raw_logs_dir: results/raw_logs
+plots_dir: results/plots
+runs_csv: results/runs.csv
+recommendation_out: results/recommendation.json
+skipped_runs_csv: results/skipped_runs.csv

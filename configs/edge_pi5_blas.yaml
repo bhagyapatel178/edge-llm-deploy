@@ -1,0 +1,22 @@
+device: BLAS
+
+n_prompt: 1536
+n_gen: 128
+min_n_prompt: 1024
+
+max_rss_mb: 8192
+min_headroom_mb: 1000
+max_ttft_s: 20.0
+min_tg_tok_s: 3.0
+
+topk: 5
+
+prune:
+  enabled: true
+  timeout_s: 180
+  stop_on_memory: true
+  stop_on_predicted_ttft: true
+  ttft_multiplier: 1.0
+  apply_to_objectives:
+    - balanced
+    - speed_first
