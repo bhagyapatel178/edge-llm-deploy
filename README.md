@@ -1,46 +1,68 @@
 # AI in a Box — Exploring Edge LLM Deployment, Benchmarking, and Mixed-Precision Compression
 
 ## Project theme
-This final-year project explores practical ways to **run large language models (LLMs) locally under edge constraints** (limited memory, latency targets, and hardware variability), and to **optimise models for on-device inference** while preserving usability and performance.
+This final-year project investigates practical ways to run large language models (LLMs) locally under edge constraints such as limited memory, latency targets, and hardware variability, and to improve the quality–efficiency trade-off of on-device inference without introducing a new runtime.
 
-The work is split into two complementary parts:
+The project is split into two complementary parts:
 
-- **Part 1: A portable benchmarking + orchestration + recommendation toolkit** that evaluates multiple GGUF model variants and runtime settings on a target device (e.g., Mac CPU vs Metal; later Raspberry Pi 5) and recommends the best configuration for user-defined constraints (e.g., “must fit in 8GB RAM”, “TTFT < 2s”, “≥ 10 tok/s”, “context length = 2k”).
-- **Part 2: A proposed mixed-precision GGUF compression framework** (a “GGUF mixer”), inspired by the motivation of approaches like AWQ (preserving quality by selectively keeping sensitive components at higher precision), but implemented at the level of **selecting layers/tensors** to keep higher precision while quantising the remainder for edge compatibility.
+- **Part 1: A portable benchmarking, orchestration, and recommendation toolkit** for GGUF-based local inference using `llama.cpp`. It evaluates multiple quantised model variants and runtime settings on a target device, logs structured benchmark results, generates plots, and recommends a deployment configuration under user-defined constraints such as memory budget, TTFT target, throughput floor, and context length requirement.
 
-I do **not** build a new inference runtime. Instead, I use an existing runtime (**llama.cpp**) as the execution engine and contribute the **evaluation + optimisation frameworks** around it:
-- candidate variant selection (download / produce GGUF variants using existing tools)
-- controlled benchmark execution
-- structured logging to CSV
-- analysis + plots
-- constraint-driven recommendation
-- (Part 2) mixed-precision model composition and evaluation
+- **Part 2: A tensor-level mixed-precision GGUF framework** that constructs runnable mixed models by combining tensors from a lower-precision GGUF and a higher-precision GGUF of the same base model. The framework was evaluated primarily on `Qwen2.5-3B-Instruct`, progressing from simple structural heuristics to an activation-aware, budgeted tensor-selection strategy.
+
+The project does **not** build a new inference runtime. Instead, it uses **`llama.cpp`** as the execution engine and contributes the evaluation, orchestration, recommendation, and mixed-precision model-construction layers around it.
+
+## Final project outcome
+### Part 1
+Part 1 was validated across:
+- MacBook Pro (`MTL0` / Metal-accelerated)
+- MacBook Pro (`BLAS` / CPU-only)
+- Raspberry Pi 5 (`BLAS` / CPU-only)
+- an additional model-family portability sanity test on `Llama-3.2-1B-Instruct-GGUF` using configuration changes only
+
+Outputs include:
+- structured raw benchmark logs
+- unified CSV results
+- plots of throughput, TTFT proxy, memory usage, and context scaling
+- scenario-specific deployment recommendations
+
+### Part 2
+Part 2 produced runnable mixed-precision GGUF models compatible with the same `llama.cpp` evaluation stack. The strongest results showed that selective tensor promotion can recover a large fraction of the quality lost under low-bit quantisation without paying the full storage cost of moving to a uniformly higher-precision model.
 
 ## Deliverables
-### Part 1 (core): Edge LLM benchmarking + recommendation toolkit
+### Part 1: Edge LLM benchmarking + recommendation toolkit
 **Inputs**
-- Base model (GGUF variants such as FP16 / Q8 / Q6 / Q4 / Q3)
-- Hardware profile (Mac CPU-only vs Mac Metal; vs later Raspberry Pi 5 CPU)
-- Constraints/targets (RAM ceiling, TTFT, tokens/sec, context length, etc.)
+- base model family in GGUF form
+- candidate quantised variants (e.g. `Q8_0`, `Q6_K`, `Q4_K_M`, `Q3_K_M`)
+- hardware/runtime profile
+- deployment constraints and workload description
 
 **Outputs**
-- Recommended deployment configuration (model variant + runtime flags)
-- CSV results + plots (TTFT proxy, tok/s, peak RSS, context scaling)
-- Optional: selected GGUF variant (downloaded or produced via existing tools)
+- recommended deployment configuration
+- CSV benchmark results
+- plots for throughput, TTFT proxy, peak RSS, and context scaling
+- recommendation JSON
 
-### Part 2 (extension): Mixed-precision GGUF “mixer” (compression framework v1)
-Create a mixed-precision GGUF by combining tensors from two GGUFs of the same base model (e.g., FP16 + Q4) according to a policy that keeps selected components at higher precision while the rest remains quantised.
+### Part 2: Mixed-precision GGUF framework
+**Inputs**
+- compatible low-precision and higher-precision GGUF files of the same base model
+- tensor-selection policy (heuristic or activation-aware)
+- optional additional storage budget
+
+**Outputs**
+- runnable mixed GGUF model
+- recipe / selected tensor list
+- perplexity and runtime evaluation against uniform-quant baselines
 
 **Goal**
 - Improve the edge trade-off between **quality / latency / memory / compatibility** compared to “vanilla” uniform quantisation (e.g., Q4 everywhere), using the same benchmarking harness from Part 1 for evaluation.
 
 ## Repo structure
-- `bench/` — Python benchmark runner, parsers, plotting, recommendation logic
-- `configs/` — hardware profiles, constraint sets, experiment grids
-- `scripts/` — setup + one-command quickstart orchestration
-- `models/` — GGUF models (ignored by git)
-- `results/` — logs, CSV, plots (ignored by git)
-- `prompts/` — benchmark prompts (short/long)
+- `bench/` — benchmark orchestration, ingestion, plotting, recommendation
+- `mixer/` — GGUF mixing logic and mixed-precision tooling
+- `configs/` — run configs, device profiles, recommendation constraints, mixer configs
+- `models/` — GGUF models (gitignored)
+- `results/` — raw logs, CSVs, plots, recommendations (gitignored)
+- `prompts/` — prompts and evaluation text used by benchmarking / perplexity workflows
 
 ## Setup (Mac)
 ### 1) Install llama.cpp runtime (Brew)
