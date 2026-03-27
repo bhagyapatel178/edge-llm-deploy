@@ -1,0 +1,29 @@
+{
+  "device": "BLAS",
+  "objective": "quality_first",
+  "workload": {
+    "n_prompt": 512,
+    "n_gen": 128
+  },
+  "constraints": {
+    "max_rss_mb": 8192.0,
+    "min_headroom_mb": 750.0,
+    "max_ttft_s": 60.0,
+    "min_tg_tok_s": 2.5,
+    "min_n_prompt": null
+  },
+  "recommended": {
+    "model_filename": "models/qwen2.5-3b/qwen2.5-3b-instruct-q6_k.gguf",
+    "quant": "q6_k",
+    "n_threads": 4,
+    "n_gpu_layers": 0,
+    "devices": "BLAS"
+  },
+  "expected": {
+    "pp_tok_s": 23.37,
+    "tg_tok_s": 4.62,
+    "ttft_proxy_s": 22.12,
+    "max_rss_mb": 5136.0
+  },
+  "note": "TTFT proxy computed as (n_prompt/pp_tok_s) + (1/tg_tok_s). Peak RSS from /usr/bin/time -l."
+}

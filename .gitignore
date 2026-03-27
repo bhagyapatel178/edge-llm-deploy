@@ -9,3 +9,6 @@ __pycache__/
 *.pyc
 .venv/
 .DS_Store
+
+# Local-only Raspberry Pi working directory
+pi5-results/

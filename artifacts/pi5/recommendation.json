@@ -1,0 +1,61 @@
+{
+  "device": "BLAS",
+  "objective": "balanced",
+  "workload": {
+    "n_prompt": 512,
+    "n_gen": 128
+  },
+  "constraints": {
+    "max_rss_mb": 8192,
+    "min_headroom_mb": 1000,
+    "max_ttft_s": 90.0,
+    "min_tg_tok_s": 2.0,
+    "min_n_prompt": 512
+  },
+  "recommended": {
+    "model_filename": "models/qwen2.5-3b/qwen2.5-3b-instruct-q4_k_m.gguf",
+    "quant": "q4_k_m",
+    "n_threads": 4,
+    "n_gpu_layers": 0,
+    "devices": "BLAS"
+  },
+  "expected": {
+    "pp_tok_s": 27.63,
+    "tg_tok_s": 6.03,
+    "ttft_proxy_s": 18.698,
+    "max_rss_mb": 3899.5
+  },
+  "top_candidates": [
+    {
+      "model_filename": "models/qwen2.5-3b/qwen2.5-3b-instruct-q4_k_m.gguf",
+      "quant": "q4_k_m",
+      "devices": "BLAS",
+      "n_prompt": 512,
+      "n_gen": 128,
+      "tg_tok_s": 6.03,
+      "ttft_proxy_s": 18.698,
+      "max_rss_mb": 3899.5
+    },
+    {
+      "model_filename": "models/qwen2.5-3b/qwen2.5-3b-instruct-q3_k_m.gguf",
+      "quant": "q3_k_m",
+      "devices": "BLAS",
+      "n_prompt": 512,
+      "n_gen": 128,
+      "tg_tok_s": 6.29,
+      "ttft_proxy_s": 33.733,
+      "max_rss_mb": 2376.9
+    },
+    {
+      "model_filename": "models/qwen2.5-3b/qwen2.5-3b-instruct-q6_k.gguf",
+      "quant": "q6_k",
+      "devices": "BLAS",
+      "n_prompt": 512,
+      "n_gen": 128,
+      "tg_tok_s": 4.62,
+      "ttft_proxy_s": 22.12,
+      "max_rss_mb": 5136.0
+    }
+  ],
+  "note": "TTFT proxy computed as (n_prompt/pp_tok_s) + (1/tg_tok_s). Peak RSS from /usr/bin/time."
+}
