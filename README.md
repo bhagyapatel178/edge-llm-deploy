@@ -70,3 +70,10 @@ Part 2 produced runnable mixed-precision GGUF models compatible with the same `l
 brew install llama.cpp
 llama-bench --help
 llama-cli --version
+
+## Example commands
+### Part 1
+python -m bench.pipeline --config configs/run.yaml --constraints configs/edge_8gb.yaml --objective balanced
+
+### Part 2
+python -m mixer.mix_gguf --config configs/mixer/qwen25_3b_last2block_q8.yaml --verbose 
