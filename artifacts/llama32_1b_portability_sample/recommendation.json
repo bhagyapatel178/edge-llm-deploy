@@ -1,0 +1,61 @@
+{
+  "device": "MTL0",
+  "objective": "balanced",
+  "workload": {
+    "n_prompt": 1920,
+    "n_gen": 128
+  },
+  "constraints": {
+    "max_rss_mb": 8192,
+    "min_headroom_mb": 750,
+    "max_ttft_s": 8.0,
+    "min_tg_tok_s": 10.0,
+    "min_n_prompt": 1920
+  },
+  "recommended": {
+    "model_filename": "models/llama32-1b/Llama-3.2-1B-Instruct-Q4_K_M.gguf",
+    "quant": "q4_k_m",
+    "n_threads": 8,
+    "n_gpu_layers": 80,
+    "devices": "MTL0"
+  },
+  "expected": {
+    "pp_tok_s": 2305.0,
+    "tg_tok_s": 197.61,
+    "ttft_proxy_s": 0.838,
+    "max_rss_mb": 1360.6
+  },
+  "top_candidates": [
+    {
+      "model_filename": "models/llama32-1b/Llama-3.2-1B-Instruct-Q4_K_M.gguf",
+      "quant": "q4_k_m",
+      "devices": "MTL0",
+      "n_prompt": 1920,
+      "n_gen": 128,
+      "tg_tok_s": 197.61,
+      "ttft_proxy_s": 0.838,
+      "max_rss_mb": 1360.6
+    },
+    {
+      "model_filename": "models/llama32-1b/Llama-3.2-1B-Instruct-Q6_K.gguf",
+      "quant": "q6_k",
+      "devices": "MTL0",
+      "n_prompt": 1920,
+      "n_gen": 128,
+      "tg_tok_s": 166.66,
+      "ttft_proxy_s": 0.854,
+      "max_rss_mb": 1565.0
+    },
+    {
+      "model_filename": "models/llama32-1b/Llama-3.2-1B-Instruct-Q8_0.gguf",
+      "quant": "q8_0",
+      "devices": "MTL0",
+      "n_prompt": 1920,
+      "n_gen": 128,
+      "tg_tok_s": 150.88,
+      "ttft_proxy_s": 0.807,
+      "max_rss_mb": 1971.5
+    }
+  ],
+  "note": "TTFT proxy computed as (n_prompt/pp_tok_s) + (1/tg_tok_s). Peak RSS from /usr/bin/time."
+}
