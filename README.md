@@ -11,6 +11,11 @@ The project is split into two complementary parts:
 
 The project does **not** build a new inference runtime. Instead, it uses **`llama.cpp`** as the execution engine and contributes the evaluation, orchestration, recommendation, and mixed-precision model-construction layers around it.
 
+## Reports
+
+- 📄 **[Final Report (PDF)](./reports/final-report.pdf)**
+- 📊 **[Presentation Slides (PDF)](./reports/presentation-slides.pdf)**
+
 ## Final project outcome
 ### Part 1
 Part 1 was validated across:
@@ -63,6 +68,7 @@ Part 2 produced runnable mixed-precision GGUF models compatible with the same `l
 - `models/` — GGUF models (gitignored)
 - `results/` — raw logs, CSVs, plots, recommendations (gitignored)
 - `prompts/` — prompts and evaluation text used by benchmarking / perplexity workflows
+- `reports/` — final report and presentation slides (PDF)
 
 ## Setup (Mac)
 ### 1) Install llama.cpp runtime (Brew)
